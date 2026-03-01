@@ -176,6 +176,7 @@
 
             const dayBlocks = menuSectionRaw.split(/(?=\d{1,2}\/\d{1,2}\/\d{4}:)/).filter(b => b.trim() !== "");
             let cardsHtml = "";
+            let rowWarm = 0, rowCold = 0, rowSoups = 0, rowSoupsZZ = 0;
             dayBlocks.forEach(block => {
                 const dateHeaderRaw = block.match(dateRegex)[0];
                 const dateKey = dateHeaderRaw.replace(':', '');
@@ -186,7 +187,7 @@
                     dayCardBody = `<div class="tm-no-meal">[Geen maaltijd]</div>`;
                 } else {
                     const items = contentRaw.split(';').map(item => item.replace(/<[^>]*>/g, '').trim()).filter(item => item !== "");
-                    let menuLabel = "Onbekend", soep = "Gewoon", dessert = "", andere = [], soepIsEx = false, menuClass = "tm-menu-default";
+                    let menuLabel = "Onbekend", soep = "Gewoon", dessert = "", andere = [], soepIsEx = false, menuClass = "tm-menu-default", blockHasSoepZZ = false;
 
                     items.forEach(item => {
                         const low = item.toLowerCase();
@@ -212,6 +213,7 @@
                             if (low.includes('gn g') || low.includes('geen g')) {
                                 soep = "geen soep";
                             } else {
+                                if (hasZZ) blockHasSoepZZ = true;
                                 let sName = cleanedItem.replace(/soep/gi, '').trim();
                                 soep = sName || "Gewoon";
                             }
@@ -221,6 +223,11 @@
                         else if (low !== "" && !hasZZ) { andere.push(cleanedItem); }
                     });
 
+                    if (menuClass === "tm-menu-warm") rowWarm++;
+                    else if (menuClass === "tm-menu-koud") rowCold++;
+                    if (soep !== "geen soep") rowSoups++;
+                    if (blockHasSoepZZ) rowSoupsZZ++;
+
                     const isSpecial = dessert && dailyStandard[dateKey] && dessert !== dailyStandard[dateKey];
                     dayCardBody = `<div class="tm-meal-row tm-menu-line"><strong>Menu:</strong> <span class="${menuClass}">${menuLabel}</span></div>
                                    <div class="tm-meal-row"><strong>Soep:</strong> <span class="${soepIsEx ? 'tm-soep-highlight' : ''}">${soep}</span></div>
@@ -229,6 +236,10 @@
                 }
                 cardsHtml += `<div class="tm-day-card"><div class="tm-date-header">${dateKey}</div>${dayCardBody}</div>`;
             });
+            row.dataset.tmWarm = rowWarm;
+            row.dataset.tmCold = rowCold;
+            row.dataset.tmSoups = rowSoups;
+            row.dataset.tmSoupsZz = rowSoupsZZ;
 
             mainCol.innerHTML = "";
             mainCol.style.textAlign = "left";
@@ -277,6 +288,32 @@
         });
 
         applyPickupsToUI();
+
+        // Totals summary at top: sum from all client rows (processed, with data attributes)
+        let totalWarm = 0, totalCold = 0, totalSoups = 0, totalSoupsZZ = 0;
+        document.querySelectorAll('div.client.row:not(.tm-extra-pickup-row)').forEach(r => {
+            totalWarm += parseInt(r.dataset.tmWarm || '0', 10);
+            totalCold += parseInt(r.dataset.tmCold || '0', 10);
+            totalSoups += parseInt(r.dataset.tmSoups || '0', 10);
+            totalSoupsZZ += parseInt(r.dataset.tmSoupsZz || '0', 10);
+        });
+        const container = document.querySelector('.container.text-center.py-5') || document.querySelector('main .container');
+        if (container) {
+            let summaryEl = document.getElementById('tm-meal-summary');
+            if (!summaryEl) {
+                summaryEl = document.createElement('div');
+                summaryEl.id = 'tm-meal-summary';
+                summaryEl.className = 'tm-meal-summary';
+                const firstChild = container.querySelector('h1');
+                container.insertBefore(summaryEl, firstChild ? firstChild.nextSibling : container.firstChild);
+            }
+            summaryEl.innerHTML = `
+                <div class="tm-summary-line"><strong>Totaal warme maaltijden (A+B):</strong> ${totalWarm}</div>
+                <div class="tm-summary-line"><strong>Totaal koude maaltijden (C+D):</strong> ${totalCold}</div>
+                <div class="tm-summary-line"><strong>Totaal soepen:</strong> ${totalSoups}</div>
+                <div class="tm-summary-line"><strong>Soepen ZZ:</strong> ${totalSoupsZZ}</div>
+            `;
+        }
     }
 
     function openPickupManager() {
@@ -449,6 +486,8 @@
 
     const style = document.createElement('style');
     style.innerHTML = `
+        .tm-meal-summary { display: flex; flex-wrap: wrap; gap: 1rem 2rem; margin-bottom: 1rem; padding: 0.75rem 1rem; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6; }
+        .tm-summary-line { font-size: 1rem; }
         .tm-button-cluster { float: right; display: flex; flex-direction: row; gap: 8px; margin-left: 10px; }
         .tm-button-cluster .btn, .tm-button-cluster a {
             display: inline-flex !important; align-items: center; justify-content: center;
