@@ -6,6 +6,8 @@
 // @author       You
 // @match        https://mijn.maaltijdzorgplatform.be/Route/Rijden*
 // @grant        none
+// @updateURL    https://raw.githubusercontent.com/Nicolas-Veys/Maaltijdzorg/main/Maaltijdzorg.user.js
+// @downloadURL  https://raw.githubusercontent.com/Nicolas-Veys/Maaltijdzorg/main/Maaltijdzorg.user.js
 // ==/UserScript==
 
 (function() {
