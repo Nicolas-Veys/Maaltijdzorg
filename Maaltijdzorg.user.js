@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Maaltijdzorg - UI Fix & Refined Styling
 // @namespace    http://tampermonkey.net/
-// @version      4.14
+// @version      4.13
 // @description  Fixed ZZ attachment, bold Menu line, and grey "Andere info" section.
 // @author       You
 // @match        https://mijn.maaltijdzorgplatform.be/Route/Rijden*
@@ -97,7 +97,7 @@
     }
 
     function processColumns() {
-        const DIETARY_CODES = ["avvz", "vgvis", "gnvis", "dia", "lv", "gesneden", "vlgmi", "gemixt"];
+        const DIETARY_CODES = ["avvz", "vgvis", "gnvis", "dia", "lv", "gesneden", "vlgmi", "gemixt", "-e", "e-"];
 
         if (!document.getElementById('tm-pickup-manager-btn')) {
             const firstRow = document.querySelector('div.client.row');
@@ -178,7 +178,7 @@
 
             const dayBlocks = menuSectionRaw.split(/(?=\d{1,2}\/\d{1,2}\/\d{4}:)/).filter(b => b.trim() !== "");
             let cardsHtml = "";
-            let rowWarm = 0, rowCold = 0, rowSoups = 0, rowSoupsZZ = 0;
+            let rowWarm = 0, rowCold = 0, rowSoups = 0, rowSoupsZZ = 0, rowSoupsBouillon = 0, rowDessertTypes = {};
             dayBlocks.forEach(block => {
                 const dateHeaderRaw = block.match(dateRegex)[0];
                 const dateKey = dateHeaderRaw.replace(':', '');
@@ -189,7 +189,7 @@
                     dayCardBody = `<div class="tm-no-meal">[Geen maaltijd]</div>`;
                 } else {
                     const items = contentRaw.split(';').map(item => item.replace(/<[^>]*>/g, '').trim()).filter(item => item !== "");
-                    let menuLabel = "Onbekend", soep = "Gewoon", dessert = "", andere = [], soepIsEx = false, menuClass = "tm-menu-default", blockHasSoepZZ = false;
+                    let menuLabel = "Onbekend", soep = "Gewoon", dessert = "", andere = [], soepIsEx = false, menuClass = "tm-menu-default", blockHasSoepZZ = false, soepExtraLabel = "";
 
                     items.forEach(item => {
                         const low = item.toLowerCase();
@@ -198,6 +198,17 @@
                         let cleanedItem = item.replace(/\s*\.\s*\[ZZ\]/gi, '[ZZ]').replace(/\s+\[ZZ\]/gi, '[ZZ]');
                         const zzOnly = cleanedItem.replace(/\[ZZ\]/gi, '').trim() === "";
                         if (zzOnly) {
+                            return;
+                        }
+
+                        // + 1 G / + 2 Gewoon / + 1 ZZ = extra soup; only "+ N extra" gets green highlight, not the soep type
+                        const extraSoepMatch = low.match(/^\s*\+\s*(\d+)\s*(.*)$/);
+                        if (extraSoepMatch && /g|gewoon|zz|bouillon/.test(extraSoepMatch[2] || "")) {
+                            const n = extraSoepMatch[1];
+                            soepExtraLabel = "+ " + n + " extra";
+                            const rest = (extraSoepMatch[2] || "").trim();
+                            if (/zz/.test(rest)) soep = "ZZ";
+                            else if (/bouillon/.test(rest)) soep = "Bouillon";
                             return;
                         }
 
@@ -227,12 +238,19 @@
 
                     if (menuClass === "tm-menu-warm") rowWarm++;
                     else if (menuClass === "tm-menu-koud") rowCold++;
-                    if (soep !== "geen soep") rowSoups++;
+                    if (soep !== "geen soep") {
+                        rowSoups++;
+                        if (soep.toLowerCase().includes('bouillon')) rowSoupsBouillon++;
+                    }
                     if (blockHasSoepZZ) rowSoupsZZ++;
+                    const dessertName = (dessert || "Geen").trim();
+                    if (dessertName) rowDessertTypes[dessertName] = (rowDessertTypes[dessertName] || 0) + 1;
 
+                    const soepPart = soepIsEx ? '<span class="tm-soep-highlight">' + soep + '</span>' : soep;
+                    const soepDisplay = soepPart + (soepExtraLabel ? ' <span class="tm-soep-extra">' + soepExtraLabel + '</span>' : '');
                     const isSpecial = dessert && dailyStandard[dateKey] && dessert !== dailyStandard[dateKey];
                     dayCardBody = `<div class="tm-meal-row tm-menu-line"><strong>Menu:</strong> <span class="${menuClass}">${menuLabel}</span></div>
-                                   <div class="tm-meal-row"><strong>Soep:</strong> <span class="${soepIsEx ? 'tm-soep-highlight' : ''}">${soep}</span></div>
+                                   <div class="tm-meal-row"><strong>Soep:</strong> ${soepDisplay}</div>
                                    <div class="tm-meal-row"><strong>Dessert:</strong> <span class="${isSpecial ? 'tm-dessert-special' : ''}">${dessert || "Geen"}</span></div>
                                    ${andere.length > 0 ? `<div class="tm-extra-info"><strong>Andere info:</strong> ${andere.join(", ")}</div>` : ''}`;
                 }
@@ -242,6 +260,8 @@
             row.dataset.tmCold = rowCold;
             row.dataset.tmSoups = rowSoups;
             row.dataset.tmSoupsZz = rowSoupsZZ;
+            row.dataset.tmSoupsBouillon = rowSoupsBouillon;
+            row.dataset.tmDessertTypes = JSON.stringify(rowDessertTypes);
 
             mainCol.innerHTML = "";
             mainCol.style.textAlign = "left";
@@ -292,28 +312,56 @@
         applyPickupsToUI();
 
         // Totals summary at top: sum from all client rows (processed, with data attributes)
-        let totalWarm = 0, totalCold = 0, totalSoups = 0, totalSoupsZZ = 0;
+        let totalWarm = 0, totalCold = 0, totalSoups = 0, totalSoupsZZ = 0, totalSoupsBouillon = 0, totalDessertTypes = {};
         document.querySelectorAll('div.client.row:not(.tm-extra-pickup-row)').forEach(r => {
             totalWarm += parseInt(r.dataset.tmWarm || '0', 10);
             totalCold += parseInt(r.dataset.tmCold || '0', 10);
             totalSoups += parseInt(r.dataset.tmSoups || '0', 10);
             totalSoupsZZ += parseInt(r.dataset.tmSoupsZz || '0', 10);
+            totalSoupsBouillon += parseInt(r.dataset.tmSoupsBouillon || '0', 10);
+            try {
+                const types = JSON.parse(r.dataset.tmDessertTypes || '{}');
+                for (const [name, count] of Object.entries(types)) {
+                    totalDessertTypes[name] = (totalDessertTypes[name] || 0) + count;
+                }
+            } catch (e) {}
         });
+        const soupExtras = [];
+        if (totalSoupsZZ > 0) soupExtras.push(`${totalSoupsZZ} ZZ`);
+        if (totalSoupsBouillon > 0) soupExtras.push(`${totalSoupsBouillon} Bouillon`);
+        const soupSuffix = soupExtras.length ? ' (' + soupExtras.join(') (') + ')' : '';
+        const dessertLines = Object.entries(totalDessertTypes)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, count]) => `<div class="tm-summary-line"><strong>${name}:</strong> ${count}</div>`)
+            .join('');
         const container = document.querySelector('.container.text-center.py-5') || document.querySelector('main .container');
         if (container) {
+            const firstChild = container.querySelector('h1');
+            const insertAfter = firstChild ? firstChild.nextSibling : container.firstChild;
+
             let summaryEl = document.getElementById('tm-meal-summary');
             if (!summaryEl) {
                 summaryEl = document.createElement('div');
                 summaryEl.id = 'tm-meal-summary';
                 summaryEl.className = 'tm-meal-summary';
-                const firstChild = container.querySelector('h1');
-                container.insertBefore(summaryEl, firstChild ? firstChild.nextSibling : container.firstChild);
+                container.insertBefore(summaryEl, insertAfter);
             }
             summaryEl.innerHTML = `
-                <div class="tm-summary-line"><strong>Totaal warme maaltijden (A+B):</strong> ${totalWarm}</div>
-                <div class="tm-summary-line"><strong>Totaal koude maaltijden (C+D):</strong> ${totalCold}</div>
-                <div class="tm-summary-line"><strong>Totaal soepen:</strong> ${totalSoups}</div>
-                <div class="tm-summary-line"><strong>Soepen ZZ:</strong> ${totalSoupsZZ}</div>
+                <div class="tm-summary-line"><strong>Totaal warme maaltijden:</strong> ${totalWarm}</div>
+                <div class="tm-summary-line"><strong>Totaal soep:</strong> ${totalSoups}${soupSuffix}</div>
+            `;
+
+            let dessertBox = document.getElementById('tm-dessert-bak-summary');
+            if (!dessertBox) {
+                dessertBox = document.createElement('div');
+                dessertBox.id = 'tm-dessert-bak-summary';
+                dessertBox.className = 'tm-dessert-bak-box';
+                summaryEl.after(dessertBox);
+            }
+            dessertBox.innerHTML = `
+                <div class="tm-dessert-bak-title">Dessert bak check</div>
+                <div class="tm-summary-line"><strong>koude schotels:</strong> ${totalCold}</div>
+                ${dessertLines}
             `;
         }
     }
@@ -490,6 +538,8 @@
     style.innerHTML = `
         .tm-meal-summary { display: flex; flex-wrap: wrap; gap: 1rem 2rem; margin-bottom: 1rem; padding: 0.75rem 1rem; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6; }
         .tm-summary-line { font-size: 1rem; }
+        .tm-dessert-bak-box { margin-bottom: 1rem; padding: 0.75rem 1rem; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6; }
+        .tm-dessert-bak-title { font-size: 1.1rem; font-weight: bold; margin-bottom: 0.5rem; }
         .tm-button-cluster { float: right; display: flex; flex-direction: row; gap: 8px; margin-left: 10px; }
         .tm-button-cluster .btn, .tm-button-cluster a {
             display: inline-flex !important; align-items: center; justify-content: center;
@@ -503,6 +553,7 @@
         .tm-menu-warm { background-color: #f8d7da; color: #721c24; padding: 1px 4px; border-radius: 4px; }
         .tm-menu-koud { background-color: #a2d9e7; color: #0c5460; padding: 1px 4px; border-radius: 4px; }
         .tm-soep-highlight { background-color: #fff3cd; font-weight: bold; padding: 1px 4px; border-radius: 4px; }
+        .tm-soep-extra { background-color: #d4edda; color: #155724; font-weight: bold; padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
         .tm-dessert-special { background-color: #ffe8cc; font-weight: bold; padding: 1px 4px; border-radius: 4px; }
         .tm-extra-info { color: #888; margin-top: 5px; font-size: 0.95em; }
         .tm-pickup-tag { background: ${PICKUP_COLOR}; color: #333; padding: 4px 8px; font-weight: bold; border-radius: 4px; display: inline-block; margin-top: 5px; }
