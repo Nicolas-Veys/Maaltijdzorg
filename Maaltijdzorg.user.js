@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Maaltijdzorg - UI Fix & Refined Styling
 // @namespace    http://tampermonkey.net/
-// @version      5.0
+// @version      5.01
 // @description  Fixed ZZ attachment, bold Menu line, and grey "Andere info" section.
 // @author       You
 // @match        https://mijn.maaltijdzorgplatform.be/Route/Rijden*
@@ -169,6 +169,14 @@
         });
     }
 
+    const COMP_COLORS = {
+        orange: { bg: '#ffe0b2', text: '#e65100', border: '#ffb74d' },
+        blue: { bg: '#bbdefb', text: '#0d47a1', border: '#64b5f6' },
+        green: { bg: '#c8e6c9', text: '#1b5e20', border: '#81c784' },
+        red: { bg: '#ffcdd2', text: '#b71c1c', border: '#e57373' },
+        purple: { bg: '#e1bee7', text: '#4a148c', border: '#ba68c8' }
+    };
+
     function applyComponentsToUI() {
         const data = loadComponentsData();
         document.querySelectorAll('.tm-component-extra').forEach(el => el.remove());
@@ -179,7 +187,8 @@
             let htmlToAppend = '';
             data.components.forEach(c => {
                 if (c.menu === menuType) {
-                    htmlToAppend += ` <span class="tm-component-extra">${c.text}</span>`;
+                    const color = COMP_COLORS[c.color] || COMP_COLORS.orange;
+                    htmlToAppend += ` <span class="tm-component-extra" style="background-color: ${color.bg}; color: ${color.text}; border-color: ${color.border};">${c.text}</span>`;
                 }
             });
             if (htmlToAppend) {
@@ -223,8 +232,8 @@
         const dessertFrequency = {};
         document.querySelectorAll('div.col').forEach(col => {
             // Support both 1- and 2-digit day/month: e.g. 1/03/2026: or 01/03/2026:
-            const dateRegex = /\d{1,2}\/\d{1,2}\/\d{4}:/g;
-            const blocks = col.innerHTML.split(/(?=\d{1,2}\/\d{1,2}\/\d{4}:)/);
+            const dateRegex = /\b\d{1,2}\/\d{1,2}\/\d{4}:/g;
+            const blocks = col.innerHTML.split(/(?=\b\d{1,2}\/\d{1,2}\/\d{4}:)/);
             blocks.forEach(block => {
                 const dateMatch = block.match(dateRegex);
                 if (!dateMatch || block.toLowerCase().includes("geen maaltijd")) return;
@@ -263,7 +272,7 @@
             const actionButtons = sideCol ? Array.from(sideCol.querySelectorAll(':scope > button, :scope > a')) : [];
             const modals = sideCol ? Array.from(sideCol.querySelectorAll('.modal')) : [];
 
-            const dateRegex = /\d{1,2}\/\d{1,2}\/\d{4}:/g;
+            const dateRegex = /\b\d{1,2}\/\d{1,2}\/\d{4}:/g;
             const firstDateMatch = html.match(dateRegex);
             if (!firstDateMatch) { row.setAttribute('data-tm-processed', 'true'); return; }
 
@@ -282,7 +291,7 @@
             const menuSectionRaw = html.substring(addressEndIndex, infoStartIndex > -1 ? infoStartIndex : html.length);
             const remainingHtml = infoStartIndex > -1 ? html.substring(infoStartIndex) : "";
 
-            const dayBlocks = menuSectionRaw.split(/(?=\d{1,2}\/\d{1,2}\/\d{4}:)/).filter(b => b.trim() !== "");
+            const dayBlocks = menuSectionRaw.split(/(?=\b\d{1,2}\/\d{1,2}\/\d{4}:)/).filter(b => b.trim() !== "");
             let cardsHtml = "";
             let rowWarm = 0, rowCold = 0, rowSoups = 0, rowSoupsZZ = 0, rowSoupsBouillon = 0, rowDessertTypes = {};
             dayBlocks.forEach(block => {
@@ -663,15 +672,24 @@
         let listHtml = '<h3>Extra Componenten toevoegen</h3>';
 
         data.components.forEach((c, idx) => {
+            const color = COMP_COLORS[c.color] || COMP_COLORS.orange;
             listHtml += `<div style="margin-bottom:8px; display:flex; align-items:center;">
                             <button type="button" class="tm-comp-remove-btn" data-comp-index="${idx}" style="margin-right:8px; color:#d00000; background:none; border:none; font-size:22px; cursor:pointer;">✖</button>
-                            <span><strong>Menu ${c.menu}:</strong> ${c.text}</span>
+                            <span><strong>Menu ${c.menu}:</strong> <span style="background-color: ${color.bg}; color: ${color.text}; border: 1px solid ${color.border}; padding: 1px 6px; border-radius: 4px; font-weight: bold;">${c.text}</span></span>
                          </div>`;
         });
 
         listHtml += '<hr><h4>Nieuw Component</h4>';
         listHtml += '<select id="tm-comp-menu" style="width:100%; margin-bottom:8px; padding:5px;"><option value="A">Menu A</option><option value="B">Menu B</option><option value="C">Menu C</option><option value="D">Menu D</option></select>';
         listHtml += '<input type="text" id="tm-comp-text" placeholder="Bv. mayonnaise of tomatn" style="width:100%; margin-bottom:8px; padding:5px;">';
+        
+        listHtml += '<div style="margin-bottom:8px; display:flex; gap:8px;">';
+        Object.keys(COMP_COLORS).forEach(k => {
+            const col = COMP_COLORS[k];
+            listHtml += `<div class="tm-color-picker-opt" data-color="${k}" style="width:24px; height:24px; border-radius:50%; background-color:${col.bg}; border:2px solid ${k === 'orange' ? '#333' : col.border}; cursor:pointer;"></div>`;
+        });
+        listHtml += '</div>';
+
         listHtml += '<button id="tm-comp-save" style="width:100%; margin-top:10px; background:#e67e22; color:white; border:none; padding:10px; border-radius:5px; font-weight:bold; cursor:pointer;">Toevoegen</button>';
         listHtml += '<button id="tm-comp-close" style="width:100%; margin-top:8px; background:#cccccc; color:#333; border:none; padding:10px; border-radius:5px; font-weight:bold; cursor:pointer;">Sluiten</button>';
 
@@ -685,11 +703,20 @@
             }
         });
 
+        let selectedColor = 'orange';
+        document.querySelectorAll('.tm-color-picker-opt').forEach(el => {
+            el.onclick = () => {
+                document.querySelectorAll('.tm-color-picker-opt').forEach(picker => picker.style.borderColor = COMP_COLORS[picker.dataset.color].border);
+                el.style.borderColor = '#333';
+                selectedColor = el.dataset.color;
+            };
+        });
+
         document.getElementById('tm-comp-save').onclick = () => {
             const m = document.getElementById('tm-comp-menu').value;
             const t = document.getElementById('tm-comp-text').value.trim();
             if (m && t) {
-                data.components.push({ menu: m, text: t });
+                data.components.push({ menu: m, text: t, color: selectedColor });
                 saveComponentsData(data);
 
                 // Refresh popup implicitly by reopening
