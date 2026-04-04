@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Maaltijdzorg - UI Fix & Refined Styling
 // @namespace    http://tampermonkey.net/
-// @version      6
+// @version      4.14
 // @description  Fixed ZZ attachment, bold Menu line, and grey "Andere info" section.
 // @author       You
 // @match        https://mijn.maaltijdzorgplatform.be/Route/Rijden*
@@ -18,26 +18,30 @@
     const DROPOFF_COLOR = '#17a2b8';
 
     function getTodayString() { return new Date().toLocaleDateString('nl-BE'); }
+
+    let _pickupDataCache = null;
     function loadPickupData() {
-        let data = JSON.parse(localStorage.getItem('tm_pickup_data') || 'null');
-        if (!data || data.date !== getTodayString()) return { date: getTodayString(), normal: [], extra: [] };
-        return data;
+        if (!_pickupDataCache) _pickupDataCache = JSON.parse(localStorage.getItem('tm_pickup_data') || 'null');
+        if (!_pickupDataCache || _pickupDataCache.date !== getTodayString()) _pickupDataCache = { date: getTodayString(), normal: [], extra: [] };
+        return _pickupDataCache;
     }
-    function savePickupData(data) { localStorage.setItem('tm_pickup_data', JSON.stringify(data)); }
+    function savePickupData(data) { _pickupDataCache = data; localStorage.setItem('tm_pickup_data', JSON.stringify(data)); }
 
+    let _dropoffDataCache = null;
     function loadDropoffData() {
-        let data = JSON.parse(localStorage.getItem('tm_dropoff_data') || 'null');
-        if (!data || data.date !== getTodayString()) return { date: getTodayString(), normal: [], samen: [], extra: [] };
-        return data;
+        if (!_dropoffDataCache) _dropoffDataCache = JSON.parse(localStorage.getItem('tm_dropoff_data') || 'null');
+        if (!_dropoffDataCache || _dropoffDataCache.date !== getTodayString()) _dropoffDataCache = { date: getTodayString(), normal: [], samen: [], extra: [] };
+        return _dropoffDataCache;
     }
-    function saveDropoffData(data) { localStorage.setItem('tm_dropoff_data', JSON.stringify(data)); }
+    function saveDropoffData(data) { _dropoffDataCache = data; localStorage.setItem('tm_dropoff_data', JSON.stringify(data)); }
 
+    let _componentsDataCache = null;
     function loadComponentsData() {
-        let data = JSON.parse(localStorage.getItem('tm_components_data') || 'null');
-        if (!data || data.date !== getTodayString()) return { date: getTodayString(), components: [] };
-        return data;
+        if (!_componentsDataCache) _componentsDataCache = JSON.parse(localStorage.getItem('tm_components_data') || 'null');
+        if (!_componentsDataCache || _componentsDataCache.date !== getTodayString()) _componentsDataCache = { date: getTodayString(), components: [] };
+        return _componentsDataCache;
     }
-    function saveComponentsData(data) { localStorage.setItem('tm_components_data', JSON.stringify(data)); }
+    function saveComponentsData(data) { _componentsDataCache = data; localStorage.setItem('tm_components_data', JSON.stringify(data)); }
 
     // Original format appears to be: [Last Name] [First Name] [Middle Name(s)] or [Last Name prefix] [Last Name] [First Name] [Middle Name(s)]
     // We want: [First Name] [Middle Name(s)] [Last Name prefix] [Last Name]
@@ -72,17 +76,20 @@
 
     function applyPickupsToUI() {
         const data = loadPickupData();
-        document.querySelectorAll('.tm-pickup-tag').forEach(el => el.remove());
         document.querySelectorAll('.tm-extra-pickup-row').forEach(el => el.remove());
 
         document.querySelectorAll('.tm-client-header-container').forEach(h => {
-            if (data.normal.includes(h.dataset.clientName)) {
-                h.innerHTML += '<div class="tm-pickup-tag">menu ophalen</div>';
+            const hasTag = h.querySelector('.tm-pickup-tag');
+            const needsTag = data.normal.includes(h.dataset.clientName);
+            if (needsTag && !hasTag) {
+                h.insertAdjacentHTML('beforeend', '<div class="tm-pickup-tag">menu ophalen</div>');
+            } else if (!needsTag && hasTag) {
+                hasTag.remove();
             }
         });
 
+        const allRows = Array.from(document.querySelectorAll('div.client.row, div.tm-extra-pickup-row, div.tm-extra-dropoff-row'));
         data.extra.forEach(ext => {
-            const allRows = Array.from(document.querySelectorAll('div.client.row, div.tm-extra-pickup-row, div.tm-extra-dropoff-row'));
             const extraRow = document.createElement('div');
             extraRow.className = 'client row tm-extra-pickup-row';
             extraRow.style = "margin: 0; padding: 15px 0; background-color: #fff9d6; text-align: left; clear:both; position: relative; left: 50%; right: 50%; margin-left: -50vw; margin-right: -50vw; width: 100vw; box-sizing: border-box;";
@@ -103,6 +110,7 @@
                 const firstClientRow = allRows.find(r => r.classList.contains('client') && r.classList.contains('row') && !r.classList.contains('tm-extra-pickup-row') && !r.classList.contains('tm-extra-dropoff-row'));
                 if (firstClientRow) {
                     firstClientRow.before(extraRow);
+                    allRows.unshift(extraRow);
                 }
             } else {
                 const targetRow = allRows.find(r => {
@@ -111,6 +119,8 @@
                 });
                 if (targetRow) {
                     targetRow.after(extraRow);
+                    const idx = allRows.indexOf(targetRow);
+                    allRows.splice(idx + 1, 0, extraRow);
                 }
             }
         });
@@ -118,21 +128,26 @@
 
     function applyDropoffsToUI() {
         const data = loadDropoffData();
-        document.querySelectorAll('.tm-dropoff-tag').forEach(el => el.remove());
         document.querySelectorAll('.tm-extra-dropoff-row').forEach(el => el.remove());
 
         document.querySelectorAll('.tm-client-header-container').forEach(h => {
-            if (data.normal.includes(h.dataset.clientName)) {
-                let txt = 'menu afgeven';
-                if (data.samen.includes(h.dataset.clientName)) {
-                    txt += ' + samen invullen';
-                }
-                h.innerHTML += `<div class="tm-dropoff-tag">${txt}</div>`;
+            const tag = h.querySelector('.tm-dropoff-tag');
+            const isNormal = data.normal.includes(h.dataset.clientName);
+
+            if (!isNormal) {
+                if (tag) tag.remove();
+                return;
+            }
+            let txt = 'menu afgeven' + (data.samen.includes(h.dataset.clientName) ? ' + samen invullen' : '');
+            if (!tag) {
+                h.insertAdjacentHTML('beforeend', `<div class="tm-dropoff-tag">${txt}</div>`);
+            } else if (tag.textContent !== txt) {
+                tag.textContent = txt;
             }
         });
 
+        const allRows = Array.from(document.querySelectorAll('div.client.row, div.tm-extra-pickup-row, div.tm-extra-dropoff-row'));
         data.extra.forEach(ext => {
-            const allRows = Array.from(document.querySelectorAll('div.client.row, div.tm-extra-pickup-row, div.tm-extra-dropoff-row'));
             const extraRow = document.createElement('div');
             extraRow.className = 'client row tm-extra-dropoff-row';
             extraRow.style = "margin: 0; padding: 15px 0; background-color: #e0f7fa; text-align: left; clear:both; position: relative; left: 50%; right: 50%; margin-left: -50vw; margin-right: -50vw; width: 100vw; box-sizing: border-box;";
@@ -156,6 +171,7 @@
                 const firstClientRow = allRows.find(r => r.classList.contains('client') && r.classList.contains('row') && !r.classList.contains('tm-extra-pickup-row') && !r.classList.contains('tm-extra-dropoff-row'));
                 if (firstClientRow) {
                     firstClientRow.before(extraRow);
+                    allRows.unshift(extraRow);
                 }
             } else {
                 const targetRow = allRows.find(r => {
@@ -164,6 +180,8 @@
                 });
                 if (targetRow) {
                     targetRow.after(extraRow);
+                    const idx = allRows.indexOf(targetRow);
+                    allRows.splice(idx + 1, 0, extraRow);
                 }
             }
         });
@@ -179,7 +197,6 @@
 
     function applyComponentsToUI() {
         const data = loadComponentsData();
-        document.querySelectorAll('.tm-component-extra').forEach(el => el.remove());
 
         document.querySelectorAll('.tm-menu-char-hook').forEach(el => {
             const menuType = el.getAttribute('data-tm-menu');
@@ -191,11 +208,24 @@
                     htmlToAppend += ` <span class="tm-component-extra" style="background-color: ${color.bg}; color: ${color.text}; border-color: ${color.border};">${c.text}</span>`;
                 }
             });
-            if (htmlToAppend) {
-                el.insertAdjacentHTML('afterend', htmlToAppend);
+
+            if (el.dataset.tmAppliedComponents !== htmlToAppend) {
+                let next = el.nextElementSibling;
+                while (next && next.classList.contains('tm-component-extra')) {
+                    const toRem = next;
+                    next = next.nextElementSibling;
+                    toRem.remove();
+                }
+                if (htmlToAppend) {
+                    el.insertAdjacentHTML('afterend', htmlToAppend);
+                }
+                el.dataset.tmAppliedComponents = htmlToAppend;
             }
         });
     }
+
+    let _globalDessertFreq = {};
+    let _globalTotals = { warm: 0, cold: 0, soups: 0, soupsZz: 0, soupsBouillon: 0, desserts: {} };
 
     function processColumns() {
         const DIETARY_CODES = ["avvz", "vgvis", "gnvis", "dia", "lv", "gesneden", "vlgmi", "gemixt", "-e", "e-"];
@@ -229,16 +259,17 @@
         const rows = document.querySelectorAll('div.client.row:not([data-tm-processed]):not(.tm-extra-pickup-row):not(.tm-extra-dropoff-row)');
         if (rows.length === 0) return;
 
-        const dessertFrequency = {};
-        document.querySelectorAll('div.col').forEach(col => {
+        rows.forEach(row => {
+            const col = row.querySelector('div.col');
+            if (!col) return;
             // Support both 1- and 2-digit day/month: e.g. 1/03/2026: or 01/03/2026:
             const dateRegex = /\b\d{1,2}\/\d{1,2}\/\d{4}:/g;
-            const blocks = col.innerHTML.split(/(?=\b\d{1,2}\/\d{1,2}\/\d{4}:)/);
+            const blocks = col.textContent.split(/(?=\b\d{1,2}\/\d{1,2}\/\d{4}:)/);
             blocks.forEach(block => {
                 const dateMatch = block.match(dateRegex);
                 if (!dateMatch || block.toLowerCase().includes("geen maaltijd")) return;
                 const date = dateMatch[0].replace(':', '');
-                const items = block.split(';').map(i => i.replace(/<[^>]*>/g, '').trim()).filter(i => i !== "");
+                const items = block.split(';').map(i => i.trim()).filter(i => i !== "");
                 let foundDessert = "";
                 items.forEach(item => {
                     const low = item.toLowerCase();
@@ -247,15 +278,15 @@
                     }
                 });
                 if (foundDessert) {
-                    if (!dessertFrequency[date]) dessertFrequency[date] = {};
-                    dessertFrequency[date][foundDessert] = (dessertFrequency[date][foundDessert] || 0) + 1;
+                    if (!_globalDessertFreq[date]) _globalDessertFreq[date] = {};
+                    _globalDessertFreq[date][foundDessert] = (_globalDessertFreq[date][foundDessert] || 0) + 1;
                 }
             });
         });
 
         const dailyStandard = {};
-        for (const date in dessertFrequency) {
-            dailyStandard[date] = Object.keys(dessertFrequency[date]).reduce((a, b) => dessertFrequency[date][a] > dessertFrequency[date][b] ? a : b);
+        for (const date in _globalDessertFreq) {
+            dailyStandard[date] = Object.keys(_globalDessertFreq[date]).reduce((a, b) => _globalDessertFreq[date][a] > _globalDessertFreq[date][b] ? a : b);
         }
 
         rows.forEach(row => {
@@ -380,6 +411,15 @@
             row.dataset.tmSoupsBouillon = rowSoupsBouillon;
             row.dataset.tmDessertTypes = JSON.stringify(rowDessertTypes);
 
+            _globalTotals.warm += rowWarm;
+            _globalTotals.cold += rowCold;
+            _globalTotals.soups += rowSoups;
+            _globalTotals.soupsZz += rowSoupsZZ;
+            _globalTotals.soupsBouillon += rowSoupsBouillon;
+            for (const [name, count] of Object.entries(rowDessertTypes)) {
+                _globalTotals.desserts[name] = (_globalTotals.desserts[name] || 0) + count;
+            }
+
             mainCol.innerHTML = "";
             mainCol.style.textAlign = "left";
 
@@ -430,29 +470,18 @@
         applyDropoffsToUI();
         applyComponentsToUI();
 
-        // Totals summary at top: sum from all client rows (processed, with data attributes)
-        let totalWarm = 0, totalCold = 0, totalSoups = 0, totalSoupsZZ = 0, totalSoupsBouillon = 0, totalDessertTypes = {};
-        document.querySelectorAll('div.client.row:not(.tm-extra-pickup-row)').forEach(r => {
-            totalWarm += parseInt(r.dataset.tmWarm || '0', 10);
-            totalCold += parseInt(r.dataset.tmCold || '0', 10);
-            totalSoups += parseInt(r.dataset.tmSoups || '0', 10);
-            totalSoupsZZ += parseInt(r.dataset.tmSoupsZz || '0', 10);
-            totalSoupsBouillon += parseInt(r.dataset.tmSoupsBouillon || '0', 10);
-            try {
-                const types = JSON.parse(r.dataset.tmDessertTypes || '{}');
-                for (const [name, count] of Object.entries(types)) {
-                    totalDessertTypes[name] = (totalDessertTypes[name] || 0) + count;
-                }
-            } catch (e) { }
-        });
         const soupExtras = [];
-        if (totalSoupsZZ > 0) soupExtras.push(`${totalSoupsZZ} ZZ`);
-        if (totalSoupsBouillon > 0) soupExtras.push(`${totalSoupsBouillon} Bouillon`);
+        if (_globalTotals.soupsZz > 0) soupExtras.push(`${_globalTotals.soupsZz} ZZ`);
+        if (_globalTotals.soupsBouillon > 0) soupExtras.push(`${_globalTotals.soupsBouillon} Bouillon`);
         const soupSuffix = soupExtras.length ? ' (' + soupExtras.join(') (') + ')' : '';
-        const dessertLines = Object.entries(totalDessertTypes)
+        const dessertLines = Object.entries(_globalTotals.desserts)
             .sort((a, b) => b[1] - a[1])
             .map(([name, count]) => `<li><strong>${name}:</strong> ${count}</li>`)
             .join('');
+
+        const totalWarm = _globalTotals.warm;
+        const totalCold = _globalTotals.cold;
+        const totalSoups = _globalTotals.soups;
         const container = document.querySelector('.container.text-center.py-5') || document.querySelector('main .container');
         if (container) {
             const firstChild = container.querySelector('h1');
@@ -520,11 +549,22 @@
             }
         });
 
-        const overlay = document.createElement('div');
-        overlay.id = 'tm-overlay';
-        overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; display:flex; align-items:center; justify-content:center;";
-        const modal = document.createElement('div');
-        modal.style = "background:white; padding:20px; border-radius:10px; width:95%; max-width:400px; max-height:85vh; overflow-y:auto;";
+        let overlay = document.getElementById('tm-overlay');
+        let modal;
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'tm-overlay';
+            overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; display:flex; align-items:center; justify-content:center;";
+            modal = document.createElement('div');
+            modal.style = "background:white; padding:20px; border-radius:10px; width:95%; max-width:400px; max-height:85vh; overflow-y:auto;";
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) overlay.remove();
+            });
+        } else {
+            modal = overlay.firstChild;
+        }
 
         let listHtml = '<h3>Menu ophalen bij:</h3>';
         // Single unified list in route order:
@@ -553,15 +593,6 @@
         listHtml += '</select><button id="tm-ex-before-first" style="width:100%; margin-bottom:8px; background:#eeeeee; color:#333; border:none; padding:8px;">Voor eerste klant</button><button id="tm-save-all" style="width:100%; margin-top:10px; background:#34a853; color:white; border:none; padding:10px;">Opslaan</button><button id="tm-close-all" style="width:100%; margin-top:8px; background:#cccccc; color:#333; border:none; padding:10px;">Sluiten</button>';
 
         modal.innerHTML = listHtml;
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
-
-        // Close when clicking outside the modal
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) {
-                document.getElementById('tm-overlay')?.remove();
-            }
-        });
 
         // Live clear error state on "Na wie?" when user selects a value
         const exAfterSelect = document.getElementById('tm-ex-after');
@@ -596,7 +627,7 @@
             }
             savePickupData(data);
             applyPickupsToUI();
-            
+
             // Close manager entirely
             document.getElementById('tm-overlay')?.remove();
         };
@@ -622,7 +653,6 @@
                 data.extra.push({ name: n, address: addr, after: '__FIRST__' });
                 savePickupData(data);
                 applyPickupsToUI();
-                document.getElementById('tm-overlay')?.remove();
                 openPickupManager();
             };
         }
@@ -648,7 +678,6 @@
                     savePickupData(data);
                     applyPickupsToUI();
                     // Reopen manager with updated data so popup stays visible
-                    document.getElementById('tm-overlay')?.remove();
                     openPickupManager();
                 }
             });
@@ -663,11 +692,22 @@
     function openComponentsManager() {
         const data = loadComponentsData();
 
-        const overlay = document.createElement('div');
-        overlay.id = 'tm-overlay-components';
-        overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; display:flex; align-items:center; justify-content:center;";
-        const modal = document.createElement('div');
-        modal.style = "background:white; padding:20px; border-radius:10px; width:95%; max-width:400px; max-height:85vh; overflow-y:auto;";
+        let overlay = document.getElementById('tm-overlay-components');
+        let modal;
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'tm-overlay-components';
+            overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; display:flex; align-items:center; justify-content:center;";
+            modal = document.createElement('div');
+            modal.style = "background:white; padding:20px; border-radius:10px; width:95%; max-width:400px; max-height:85vh; overflow-y:auto;";
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) overlay.remove();
+            });
+        } else {
+            modal = overlay.firstChild;
+        }
 
         let listHtml = '<h3>Extra Componenten toevoegen</h3>';
 
@@ -682,7 +722,7 @@
         listHtml += '<hr><h4>Nieuw Component</h4>';
         listHtml += '<select id="tm-comp-menu" style="width:100%; margin-bottom:8px; padding:5px;"><option value="A">Menu A</option><option value="B">Menu B</option><option value="C">Menu C</option><option value="D">Menu D</option></select>';
         listHtml += '<input type="text" id="tm-comp-text" placeholder="Bv. mayonnaise of tomatn" style="width:100%; margin-bottom:8px; padding:5px;">';
-        
+
         listHtml += '<div style="margin-bottom:8px; display:flex; gap:8px;">';
         Object.keys(COMP_COLORS).forEach(k => {
             const col = COMP_COLORS[k];
@@ -694,14 +734,6 @@
         listHtml += '<button id="tm-comp-close" style="width:100%; margin-top:8px; background:#cccccc; color:#333; border:none; padding:10px; border-radius:5px; font-weight:bold; cursor:pointer;">Sluiten</button>';
 
         modal.innerHTML = listHtml;
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
-
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) {
-                document.getElementById('tm-overlay-components')?.remove();
-            }
-        });
 
         let selectedColor = 'orange';
         document.querySelectorAll('.tm-color-picker-opt').forEach(el => {
@@ -720,7 +752,6 @@
                 saveComponentsData(data);
 
                 // Refresh popup implicitly by reopening
-                document.getElementById('tm-overlay-components')?.remove();
                 openComponentsManager();
 
                 applyComponentsToUI();
@@ -734,7 +765,6 @@
                 saveComponentsData(data);
 
                 // Refresh popup implicitly by reopening
-                document.getElementById('tm-overlay-components')?.remove();
                 openComponentsManager();
 
                 applyComponentsToUI();
@@ -771,11 +801,22 @@
             }
         });
 
-        const overlay = document.createElement('div');
-        overlay.id = 'tm-overlay-dropoff';
-        overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; display:flex; align-items:center; justify-content:center;";
-        const modal = document.createElement('div');
-        modal.style = "background:white; padding:20px; border-radius:10px; width:95%; max-width:400px; max-height:85vh; overflow-y:auto;";
+        let overlay = document.getElementById('tm-overlay-dropoff');
+        let modal;
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'tm-overlay-dropoff';
+            overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; display:flex; align-items:center; justify-content:center;";
+            modal = document.createElement('div');
+            modal.style = "background:white; padding:20px; border-radius:10px; width:95%; max-width:400px; max-height:85vh; overflow-y:auto;";
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) overlay.remove();
+            });
+        } else {
+            modal = overlay.firstChild;
+        }
 
         let listHtml = '<h3>Menu afgeven bij:</h3>';
         routeOrder.forEach(name => {
@@ -805,12 +846,6 @@
         listHtml += '</select><button id="tm-ex-do-before-first" style="width:100%; margin-bottom:8px; background:#eeeeee; color:#333; border:none; padding:8px;">Voor eerste klant</button><button id="tm-do-save-all" style="width:100%; margin-top:10px; background:#17a2b8; color:white; border:none; padding:10px;">Opslaan</button><button id="tm-do-close-all" style="width:100%; margin-top:8px; background:#cccccc; color:#333; border:none; padding:10px;">Sluiten</button>';
 
         modal.innerHTML = listHtml;
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
-
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) document.getElementById('tm-overlay-dropoff')?.remove();
-        });
 
         const exAfterSelect = document.getElementById('tm-ex-do-after');
         if (exAfterSelect) exAfterSelect.addEventListener('change', () => exAfterSelect.classList.remove('tm-ex-after-error'));
@@ -818,7 +853,7 @@
         document.getElementById('tm-do-save-all').onclick = () => {
             data.normal = Array.from(document.querySelectorAll('.tm-dropoff-check:checked')).map(c => c.value);
             data.samen = Array.from(document.querySelectorAll('.tm-dropoff-samen:checked:not(.tm-extra-dropoff-samen)')).map(c => c.value);
-            
+
             // update extras samen status
             document.querySelectorAll('.tm-extra-dropoff-samen').forEach(cb => {
                 const idx = parseInt(cb.getAttribute('data-extra-index'), 10);
@@ -849,7 +884,7 @@
                 const n = document.getElementById('tm-ex-do-name').value;
                 const addr = document.getElementById('tm-ex-do-addr').value;
                 const s = document.getElementById('tm-ex-do-samen').checked;
-                
+
                 // Also save current checkboxes
                 data.normal = Array.from(document.querySelectorAll('.tm-dropoff-check:checked')).map(c => c.value);
                 data.samen = Array.from(document.querySelectorAll('.tm-dropoff-samen:checked:not(.tm-extra-dropoff-samen)')).map(c => c.value);
@@ -866,7 +901,6 @@
                 data.extra.push({ name: n, address: addr, after: '__FIRST__', samen: s });
                 saveDropoffData(data);
                 applyDropoffsToUI();
-                document.getElementById('tm-overlay-dropoff')?.remove();
                 openDropoffManager();
             };
         }
@@ -875,7 +909,7 @@
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
                 // save checkboxes before remove
                 data.normal = Array.from(document.querySelectorAll('.tm-dropoff-check:checked')).map(c => c.value);
                 data.samen = Array.from(document.querySelectorAll('.tm-dropoff-samen:checked:not(.tm-extra-dropoff-samen)')).map(c => c.value);
@@ -891,7 +925,6 @@
                     }
                     saveDropoffData(data);
                     applyDropoffsToUI();
-                    document.getElementById('tm-overlay-dropoff')?.remove();
                     openDropoffManager();
                 }
             });
@@ -961,7 +994,13 @@
     `;
     document.head.appendChild(style);
 
-    const observer = new MutationObserver(() => processColumns());
+    let debounceTimer;
+    const observer = new MutationObserver(() => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            processColumns();
+        }, 100);
+    });
     observer.observe(document.body, { childList: true, subtree: true });
     processColumns();
 })();
